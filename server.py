@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from pdf_utils import extract_pages
 from tts_engine import (
+    KOKORO_AVAILABLE,
     NARRATOR_SILENCE,
     NARRATOR_VOICE,
     VOICES,
@@ -22,8 +23,9 @@ from tts_engine import (
 
 app = FastAPI(title="TTS Player")
 
-BOOKS_DIR = Path(__file__).parent / "books"
-BOOKS_DIR.mkdir(exist_ok=True)
+import os
+BOOKS_DIR = Path(os.environ.get("BOOKS_DIR", Path(__file__).parent / "books"))
+BOOKS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _make_book_id(filename: str) -> str:
@@ -41,6 +43,8 @@ async def index():
 
 @app.get("/api/voices")
 async def voices():
+    if not KOKORO_AVAILABLE:
+        return {lang: {"edge": v["edge"]} for lang, v in VOICES.items()}
     return VOICES
 
 

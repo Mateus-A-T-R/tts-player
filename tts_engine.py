@@ -11,7 +11,13 @@ os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
 import edge_tts
 import numpy as np
 import soundfile as sf
-from kokoro import KPipeline
+
+try:
+    from kokoro import KPipeline
+    KOKORO_AVAILABLE = True
+except ImportError:
+    KPipeline = None
+    KOKORO_AVAILABLE = False
 
 SAMPLE_RATE = 24000
 
