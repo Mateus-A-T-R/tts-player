@@ -6,3 +6,5 @@ soundfile
 numpy
 pymupdf
 python-multipart
+ebooklib
+beautifulsoup4

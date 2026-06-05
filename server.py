@@ -7,7 +7,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSock
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from pdf_utils import extract_pages
+from pdf_utils import extract_epub_pages, extract_pages
 from tts_engine import (
     KOKORO_AVAILABLE,
     NARRATOR_SILENCE,
@@ -106,8 +106,12 @@ async def delete_book(book_id: str):
 @app.post("/api/pdf")
 async def upload_pdf(file: UploadFile = File(...)):
     contents = await file.read()
-    pages = await asyncio.to_thread(extract_pages, contents)
-    book_id = _make_book_id(file.filename or "livro")
+    filename  = file.filename or "livro"
+    if filename.lower().endswith(".epub"):
+        pages = await asyncio.to_thread(extract_epub_pages, contents)
+    else:
+        pages = await asyncio.to_thread(extract_pages, contents)
+    book_id   = _make_book_id(filename)
     book_data = {
         "id": book_id,
         "filename": file.filename,

@@ -330,7 +330,7 @@
   </div>
 
   <!-- Book Library -->
-  <input type="file" id="pdf-file-input" accept=".pdf" style="display:none" onchange="onPdfSelected(event)">
+  <input type="file" id="pdf-file-input" accept=".pdf,.epub" style="display:none" onchange="onPdfSelected(event)">
   <div class="library-row">
     <button class="btn-pdf" onclick="document.getElementById('pdf-file-input').click()" title="Adicionar livro à biblioteca">📄 Novo Livro</button>
     <select id="books-select" class="books-select" onchange="onBookSelected(this.value)" style="display:none">
