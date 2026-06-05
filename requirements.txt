@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+websockets
+edge-tts
+kokoro>=0.9.0
+soundfile
+numpy
+pymupdf
+python-multipart
