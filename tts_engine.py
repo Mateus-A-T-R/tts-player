@@ -90,6 +90,50 @@ def split_sentences(text: str) -> list[str]:
     return result if result else [text.strip()]
 
 
+# ── SSML helpers for narrator mode ───────────────────────────────────────────
+
+def _xml_escape(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _build_narrator_ssml(sentence: str, voice: str, lang: str = "pt-BR") -> str:
+    """Build expressive SSML for narrator mode with emotional prosody."""
+    stripped = sentence.strip()
+    is_exclamatory = stripped.endswith("!")
+    is_question    = stripped.endswith("?")
+    has_ellipsis   = bool(re.search(r"\.{3}|…", stripped))
+
+    esc = _xml_escape(stripped)
+
+    # Emphasis on quoted dialogue — must run BEFORE break tags so the " in
+    # <break time="Xms"/> attributes don't get falsely matched as quote pairs
+    esc = re.sub(r'["“„«]([^"“”„»\n]+)["”„»]',
+                 r'<emphasis level="moderate">\1</emphasis>', esc)
+
+    # Natural pauses at internal punctuation
+    esc = re.sub(r"(,)( )",        r'\1<break time="120ms"/>\2', esc)
+    esc = re.sub(r"(;)( )",        r'\1<break time="180ms"/>\2', esc)
+    esc = re.sub(r"(—|–)( ?)",     r'<break time="260ms"/>\1\2', esc)
+    esc = re.sub(r"(\.{3}|…)( |$)", r'\1<break time="500ms"/>\2', esc)
+
+    # Sentence-level prosody (overlaid on top of base narrator prosody)
+    if is_exclamatory:
+        inner = f'<prosody rate="+8%" pitch="+3Hz">{esc}</prosody>'
+    elif is_question:
+        inner = f'<prosody rate="+3%" pitch="+5Hz">{esc}</prosody>'
+    elif has_ellipsis:
+        inner = f'<prosody rate="-10%">{esc}</prosody>'
+    else:
+        inner = esc
+
+    body = f'<prosody rate="{NARRATOR_RATE}" pitch="{NARRATOR_PITCH}">{inner}</prosody>'
+    return (
+        f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="{lang}">'
+        f'<voice name="{voice}">{body}</voice>'
+        f'</speak>'
+    )
+
+
 # ── Silence generator (WAV, for narrator pauses) ─────────────────────────────
 
 def generate_silence(duration_ms: int) -> bytes:
@@ -113,9 +157,10 @@ async def synthesize_edge(sentence: str, voice: str, speed: float, pitch: str = 
     return b"".join(chunks)
 
 
-async def synthesize_edge_narrator(sentence: str, voice: str) -> bytes:
-    """Narrator preset: fixed rate + pitch for storytelling feel."""
-    comm = edge_tts.Communicate(sentence, voice, rate=NARRATOR_RATE, pitch=NARRATOR_PITCH)
+async def synthesize_edge_narrator(sentence: str, voice: str, lang: str = "pt-BR") -> bytes:
+    """Narrator preset with expressive SSML — emotional prosody and natural pauses."""
+    ssml = _build_narrator_ssml(sentence, voice, lang)
+    comm = edge_tts.Communicate(ssml, voice)
     chunks: list[bytes] = []
     async for chunk in comm.stream():
         if chunk["type"] == "audio":

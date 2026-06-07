@@ -181,7 +181,7 @@ async def tts_stream(ws: WebSocket):
 
             try:
                 if engine == "edge" and narrator:
-                    audio_bytes = await synthesize_edge_narrator(sentence, voice)
+                    audio_bytes = await synthesize_edge_narrator(sentence, voice, language)
                 elif engine == "edge":
                     audio_bytes = await synthesize_edge(sentence, voice, speed, pitch)
                 else:
