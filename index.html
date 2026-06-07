@@ -456,11 +456,13 @@ let pendingHighlights = [];  // [{type, sentIdx, wi, pct, audioCtxTime}]
 let hlLoopActive      = false;
 
 // Reconnection / stability
-let reconnectAttempts = 0;
-const MAX_RECONNECT   = 3;
-let decodeErrorCount  = 0;
-let stallTimer        = null;
-let lastWsPayload     = null;
+let reconnectAttempts   = 0;
+const MAX_RECONNECT     = 3;
+let decodeErrorCount    = 0;
+let stallTimer          = null;
+let lastWsPayload       = null;
+let lastDecodedSentIdx  = -1;  // last sentence successfully decoded & scheduled
+let reconnectSentOffset = 0;   // sentence index offset when reconnecting mid-text
 
 // iOS: resume AudioContext when user returns to the tab/app
 document.addEventListener("visibilitychange", () => {
@@ -654,6 +656,7 @@ async function scheduleAudioChunk(arrayBuffer, sentIdx) {
   try {
     audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
     decodeErrorCount = 0;
+    if (sentIdx !== null && sentIdx >= 0) lastDecodedSentIdx = sentIdx;
   } catch (e) {
     decodeErrorCount++;
     if (decodeErrorCount >= 2) setStatus("Aviso: problema ao decodificar áudio.", true);
@@ -848,8 +851,10 @@ function startPlayback() {
   currentWordEl     = null;
   pendingHighlights = [];
   hlLoopActive      = false;
-  reconnectAttempts = 0;
-  decodeErrorCount  = 0;
+  reconnectAttempts   = 0;
+  decodeErrorCount    = 0;
+  lastDecodedSentIdx  = -1;
+  reconnectSentOffset = 0;
 
   // iOS: sync play button with AudioContext interruptions (phone call, etc.)
   audioCtx.onstatechange = () => {
@@ -897,8 +902,8 @@ function openWebSocket(payload) {
     } else {
       const msg = JSON.parse(event.data);
       if (msg.type === "sentence_start") {
-        pendingSentIdx = msg.index;
-        if (msg.words) sentenceWords[msg.index] = msg.words;
+        pendingSentIdx = msg.index + reconnectSentOffset;
+        if (msg.words) sentenceWords[pendingSentIdx] = msg.words;
       } else if (msg.type === "done") {
         clearTimeout(stallTimer);
         reconnectAttempts = 0;
@@ -956,19 +961,25 @@ function attemptReconnect() {
   const delay = 1000 * reconnectAttempts;
   setStatus(`Reconectando (${reconnectAttempts}/${MAX_RECONNECT})…`);
 
-  // Reset audio state so reconnect starts clean
+  // Build payload with only the remaining sentences (skip already-decoded ones)
+  const sentOffset = lastDecodedSentIdx + 1;
+  const hasRemaining = sentOffset > 0 && sentOffset < sentences.length;
+  reconnectSentOffset = hasRemaining ? sentOffset : 0;
+  const reconnectPayload = hasRemaining
+    ? { ...lastWsPayload, text: sentences.slice(sentOffset).join(" ") }
+    : lastWsPayload;
+
+  // Reset audio state for clean restart (but preserve highlight/display state)
   if (audioCtx) { audioCtx.close().catch(() => {}); }
   const AC = window.AudioContext || window.webkitAudioContext;
   audioCtx = new AC();
   nextTime = audioCtx.currentTime + 0.1;
   audioChain = Promise.resolve();
-  pendingSentIdx = -1;
-  lastHighlightSent = -1;
-  pendingHighlights = [];
-  hlLoopActive = false;
+  pendingSentIdx = reconnectSentOffset - 1;
   decodeErrorCount = 0;
+  // Do NOT reset lastHighlightSent/pendingHighlights — preserve already-done word highlights
 
-  setTimeout(() => openWebSocket(lastWsPayload), delay);
+  setTimeout(() => openWebSocket(reconnectPayload), delay);
 }
 
 function stopPlayback() {
