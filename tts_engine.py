@@ -12,6 +12,8 @@ import edge_tts
 import numpy as np
 import soundfile as sf
 
+from narrator_rules import apply_narrator_rules
+
 try:
     from kokoro import KPipeline
     KOKORO_AVAILABLE = True
@@ -96,42 +98,69 @@ def _xml_escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def _build_narrator_ssml(sentence: str, voice: str, lang: str = "pt-BR") -> str:
-    """Build expressive SSML for narrator mode with emotional prosody."""
+def _build_narrator_ssml(sentence: str, voice: str, lang: str = “pt-BR”) -> tuple[str, int]:
+    “””
+    Build expressive SSML for narrator mode.
+    Returns (ssml_string, pause_before_ms).
+    “””
     stripped = sentence.strip()
-    is_exclamatory = stripped.endswith("!")
-    is_question    = stripped.endswith("?")
-    has_ellipsis   = bool(re.search(r"\.{3}|…", stripped))
+    is_exclamatory = stripped.endswith(“!”)
+    is_question    = stripped.endswith(“?”)
+    has_ellipsis   = bool(re.search(r”\.{3}|…”, stripped))
 
     esc = _xml_escape(stripped)
 
-    # Emphasis on quoted dialogue — must run BEFORE break tags so the " in
-    # <break time="Xms"/> attributes don't get falsely matched as quote pairs
-    esc = re.sub(r'["“„«]([^"“”„»\n]+)["”„»]',
-                 r'<emphasis level="moderate">\1</emphasis>', esc)
+    # Quoted dialogue emphasis — BEFORE break tags to avoid false “ matches
+    esc = re.sub(r'[“”„«]([^”””„»\n]+)[“”„»]',
+                 r'<emphasis level=”moderate”>\1</emphasis>', esc)
 
     # Natural pauses at internal punctuation
-    esc = re.sub(r"(,)( )",        r'\1<break time="120ms"/>\2', esc)
-    esc = re.sub(r"(;)( )",        r'\1<break time="180ms"/>\2', esc)
-    esc = re.sub(r"(—|–)( ?)",     r'<break time="260ms"/>\1\2', esc)
-    esc = re.sub(r"(\.{3}|…)( |$)", r'\1<break time="500ms"/>\2', esc)
+    esc = re.sub(r”(,)( )”,         r'\1<break time=”120ms”/>\2', esc)
+    esc = re.sub(r”(;)( )”,         r'\1<break time=”180ms”/>\2', esc)
+    esc = re.sub(r”(—|–)( ?)”,      r'<break time=”260ms”/>\1\2', esc)
+    esc = re.sub(r”(\.{3}|…)( |$)”, r'\1<break time=”500ms”/>\2', esc)
 
-    # Sentence-level prosody (overlaid on top of base narrator prosody)
-    if is_exclamatory:
-        inner = f'<prosody rate="+8%" pitch="+3Hz">{esc}</prosody>'
-    elif is_question:
-        inner = f'<prosody rate="+3%" pitch="+5Hz">{esc}</prosody>'
-    elif has_ellipsis:
-        inner = f'<prosody rate="-10%">{esc}</prosody>'
-    else:
-        inner = esc
+    # Apply narrator rules (verb detection, dramatic shorts, caps, etc.)
+    esc, meta = apply_narrator_rules(esc, stripped, lang)
 
-    body = f'<prosody rate="{NARRATOR_RATE}" pitch="{NARRATOR_PITCH}">{inner}</prosody>'
-    return (
-        f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="{lang}">'
-        f'<voice name="{voice}">{body}</voice>'
+    # Build rate/pitch from base + deltas from rules
+    rate_delta  = meta.get(“rate_delta”)
+    pitch_delta = meta.get(“pitch_delta”)
+    volume      = meta.get(“volume”)
+    pause_ms    = meta.get(“pause_before_ms”, 0)
+
+    # Sentence-type overrides (exclamation / question / ellipsis)
+    # Only apply if rules didn't already set a delta
+    if not rate_delta and not pitch_delta:
+        if is_exclamatory:
+            rate_delta, pitch_delta = “+8%”, “+3Hz”
+        elif is_question:
+            rate_delta, pitch_delta = “+3%”, “+5Hz”
+        elif has_ellipsis:
+            rate_delta = “-10%”
+
+    # Build inner prosody layer (rule-based adjustments)
+    inner_attrs = “”
+    if rate_delta:
+        inner_attrs += f' rate=”{rate_delta}”'
+    if pitch_delta:
+        inner_attrs += f' pitch=”{pitch_delta}”'
+    if volume == “loud”:
+        inner_attrs += ' volume=”loud”'
+    elif volume == “soft”:
+        inner_attrs += ' volume=”soft”'
+
+    inner = f”<prosody{inner_attrs}>{esc}</prosody>” if inner_attrs else esc
+
+    # Outer base narrator prosody
+    body = f'<prosody rate=”{NARRATOR_RATE}” pitch=”{NARRATOR_PITCH}”>{inner}</prosody>'
+
+    ssml = (
+        f'<speak version=”1.0” xmlns=”http://www.w3.org/2001/10/synthesis” xml:lang=”{lang}”>'
+        f'<voice name=”{voice}”>{body}</voice>'
         f'</speak>'
     )
+    return ssml, pause_ms
 
 
 # ── Silence generator (WAV, for narrator pauses) ─────────────────────────────
@@ -158,14 +187,20 @@ async def synthesize_edge(sentence: str, voice: str, speed: float, pitch: str = 
 
 
 async def synthesize_edge_narrator(sentence: str, voice: str, lang: str = "pt-BR") -> bytes:
-    """Narrator preset with expressive SSML — emotional prosody and natural pauses."""
-    ssml = _build_narrator_ssml(sentence, voice, lang)
+    """Narrator preset with expressive SSML — emotional prosody and natural pauses.
+    Returns audio bytes; pause_before_ms is prepended as silence by the caller."""
+    ssml, pause_ms = _build_narrator_ssml(sentence, voice, lang)
     comm = edge_tts.Communicate(ssml, voice)
     chunks: list[bytes] = []
     async for chunk in comm.stream():
         if chunk["type"] == "audio":
             chunks.append(chunk["data"])
-    return b"".join(chunks)
+    audio = b"".join(chunks)
+
+    if pause_ms > 0:
+        silence = generate_silence(pause_ms)
+        return silence + audio
+    return audio
 
 
 # ── Kokoro (sync, returns WAV bytes — call via asyncio.to_thread) ─────────────
