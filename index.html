@@ -455,6 +455,20 @@ let audioChain        = Promise.resolve();
 let pendingHighlights = [];  // [{type, sentIdx, wi, pct, audioCtxTime}]
 let hlLoopActive      = false;
 
+// Reconnection / stability
+let reconnectAttempts = 0;
+const MAX_RECONNECT   = 3;
+let decodeErrorCount  = 0;
+let stallTimer        = null;
+let lastWsPayload     = null;
+
+// iOS: resume AudioContext when user returns to the tab/app
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && audioCtx && audioCtx.state === "suspended" && isPlaying) {
+    audioCtx.resume();
+  }
+});
+
 // ── Waveform ─────────────────────────────────────────────────────────────────
 (function () {
   const wf = document.getElementById("waveform");
@@ -631,10 +645,18 @@ function hlLoop() {
 async function scheduleAudioChunk(arrayBuffer, sentIdx) {
   if (!audioCtx || audioCtx.state === "closed") return;
 
+  // iOS: AudioContext starts suspended and must be resumed inside a user gesture chain
+  if (audioCtx.state !== "running") {
+    try { await audioCtx.resume(); } catch (_) {}
+  }
+
   let audioBuffer;
   try {
     audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    decodeErrorCount = 0;
   } catch (e) {
+    decodeErrorCount++;
+    if (decodeErrorCount >= 2) setStatus("Aviso: problema ao decodificar áudio.", true);
     console.warn("Decode error:", e);
     return;
   }
@@ -817,7 +839,8 @@ function startPlayback() {
   const language = document.getElementById("lang-select").value;
   const engine   = currentEngine;
 
-  audioCtx   = new AudioContext();
+  const AC = window.AudioContext || window.webkitAudioContext;
+  audioCtx   = new AC();
   nextTime   = audioCtx.currentTime + 0.1;
   audioChain = Promise.resolve();
   pendingSentIdx    = -1;
@@ -825,21 +848,49 @@ function startPlayback() {
   currentWordEl     = null;
   pendingHighlights = [];
   hlLoopActive      = false;
+  reconnectAttempts = 0;
+  decodeErrorCount  = 0;
+
+  // iOS: sync play button with AudioContext interruptions (phone call, etc.)
+  audioCtx.onstatechange = () => {
+    if (!isPlaying) return;
+    const btn = document.getElementById("btn-play");
+    const wf  = document.getElementById("waveform");
+    if (audioCtx.state === "running") {
+      btn.textContent = "⏸";
+      wf.classList.add("playing");
+    } else if (audioCtx.state === "suspended" || audioCtx.state === "interrupted") {
+      btn.textContent = "▶";
+      wf.classList.remove("playing");
+    }
+  };
 
   buildDisplayView(text);
   setPlayingState(true);
   setStatus(engine === "edge" ? "Conectando…" : "Carregando…");
+
+  lastWsPayload = { text, voice, speed, language, engine, pitch: narratorPitch, narrator: narratorMode };
+  openWebSocket(lastWsPayload);
+}
+
+function openWebSocket(payload) {
+  clearTimeout(stallTimer);
+  stallTimer = setTimeout(() => {
+    if (ws) { ws.onclose = null; ws.close(); ws = null; }
+    attemptReconnect();
+  }, 15000);
 
   const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
   ws = new WebSocket(`${wsProto}//${location.host}/ws`);
   ws.binaryType = "arraybuffer";
 
   ws.onopen = () => {
-    ws.send(JSON.stringify({ text, voice, speed, language, engine, pitch: narratorPitch, narrator: narratorMode }));
+    ws.send(JSON.stringify(payload));
     setStatus("Reproduzindo…");
   };
 
   ws.onmessage = (event) => {
+    resetStallTimer();
     if (event.data instanceof ArrayBuffer) {
       const idx = pendingSentIdx;
       audioChain = audioChain.then(() => scheduleAudioChunk(event.data, idx));
@@ -847,9 +898,10 @@ function startPlayback() {
       const msg = JSON.parse(event.data);
       if (msg.type === "sentence_start") {
         pendingSentIdx = msg.index;
-        // Update sentenceWords from server if it sent them (server splits identically)
         if (msg.words) sentenceWords[msg.index] = msg.words;
       } else if (msg.type === "done") {
+        clearTimeout(stallTimer);
+        reconnectAttempts = 0;
         audioChain = audioChain.then(() => {
           const remaining = Math.max(0, nextTime - audioCtx.currentTime);
           setTimeout(() => {
@@ -875,19 +927,61 @@ function startPlayback() {
   };
 
   ws.onerror = () => {
-    setStatus("Erro de conexão com o servidor.", true);
-    setPlayingState(false);
+    clearTimeout(stallTimer);
+  };
+
+  ws.onclose = (e) => {
+    clearTimeout(stallTimer);
+    if (isPlaying && e.code !== 1000) {
+      attemptReconnect();
+    }
   };
 }
 
+function resetStallTimer() {
+  clearTimeout(stallTimer);
+  stallTimer = setTimeout(() => {
+    if (ws) { ws.onclose = null; ws.close(); ws = null; }
+    attemptReconnect();
+  }, 15000);
+}
+
+function attemptReconnect() {
+  if (!isPlaying || !lastWsPayload || reconnectAttempts >= MAX_RECONNECT) {
+    setStatus("Erro de conexão com o servidor.", true);
+    setPlayingState(false);
+    return;
+  }
+  reconnectAttempts++;
+  const delay = 1000 * reconnectAttempts;
+  setStatus(`Reconectando (${reconnectAttempts}/${MAX_RECONNECT})…`);
+
+  // Reset audio state so reconnect starts clean
+  if (audioCtx) { audioCtx.close().catch(() => {}); }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  audioCtx = new AC();
+  nextTime = audioCtx.currentTime + 0.1;
+  audioChain = Promise.resolve();
+  pendingSentIdx = -1;
+  lastHighlightSent = -1;
+  pendingHighlights = [];
+  hlLoopActive = false;
+  decodeErrorCount = 0;
+
+  setTimeout(() => openWebSocket(lastWsPayload), delay);
+}
+
 function stopPlayback() {
+  clearTimeout(stallTimer);
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "stop" }));
-  if (ws) { ws.close(); ws = null; }
-  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+  if (ws) { ws.onclose = null; ws.close(); ws = null; }
+  if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
   nextTime          = 0;
   audioChain        = Promise.resolve();
   pendingHighlights = [];
   hlLoopActive      = false;
+  reconnectAttempts = 0;
+  decodeErrorCount  = 0;
   setPlayingState(false);
 }
 </script>
