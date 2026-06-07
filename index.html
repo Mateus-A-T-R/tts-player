@@ -1205,11 +1205,15 @@ function attemptReconnect() {
     ? { ...lastWsPayload, text: sentences.slice(sentOffset).join(" ") }
     : lastWsPayload;
 
-  if (audioCtx) { audioCtx.close().catch(() => {}); }
-  const AC = window.AudioContext || window.webkitAudioContext;
-  audioCtx = new AC();
-  nextTime = audioCtx.currentTime + 0.1;
-  audioChain = Promise.resolve();
+  // Manter AudioContext vivo: áudio já bufferizado continua tocando
+  // enquanto a reconexão acontece. Só recriar se estiver fechado.
+  if (!audioCtx || audioCtx.state === "closed") {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    audioCtx = new AC();
+    nextTime = audioCtx.currentTime + 0.1;
+  }
+
+  // Limpar fila antiga sem tocar no AudioContext ou no nextTime
   audioQueue = []; audioProcessing = false; firstChunkReceived = false;
   pendingSentIdx = reconnectSentOffset - 1;
   decodeErrorCount = 0;
@@ -1220,6 +1224,14 @@ function attemptReconnect() {
 function retryPlayback() {
   document.getElementById('btn-retry').style.display = 'none';
   reconnectAttempts = 0;
+
+  // Ao retry manual (após falha total), recriar AudioContext se necessário
+  if (!audioCtx || audioCtx.state === "closed") {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    audioCtx = new AC();
+    nextTime = audioCtx.currentTime + 0.1;
+  }
+
   isPlaying = true;
   document.getElementById('btn-play').textContent = '⏸';
   document.getElementById('waveform').classList.add('playing');
