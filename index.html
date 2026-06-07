@@ -372,6 +372,17 @@
       transition: background .15s;
     }
     .book-card-continue:hover { background: var(--accent-h); }
+    .book-card-footer {
+      display: flex; gap: 6px; margin-top: auto;
+    }
+    .book-card-footer .book-card-continue { flex: 1; margin-top: 0; }
+    .book-card-del {
+      flex-shrink: 0; border: 1.5px solid var(--surface3);
+      border-radius: 20px; background: transparent; color: var(--muted);
+      cursor: pointer; font-size: 13px; padding: 0 10px;
+      transition: border-color .15s, color .15s;
+    }
+    .book-card-del:hover { border-color: #f4533a; color: #f4533a; }
     .lib-empty { color: var(--muted); font-size: 14px; text-align: center; padding: 24px 0; }
     .btn-library {
       display: flex; align-items: center; gap: 6px;
@@ -928,7 +939,10 @@ async function loadBookLibrary() {
           <div class="book-card-title">${b.filename.replace(/\.(pdf|epub)$/i,'')}</div>
           <div class="book-card-meta">${b.total} páginas</div>
           ${b.last_page > 0 ? `<div class="book-card-progress">● ${label}</div>` : `<div class="book-card-meta">${label}</div>`}
-          <button class="book-card-continue" onclick="selectBook('${b.id}'); event.stopPropagation()">${cont}</button>
+          <div class="book-card-footer">
+            <button class="book-card-continue" onclick="selectBook('${b.id}'); event.stopPropagation()">${cont}</button>
+            <button class="book-card-del" onclick="deleteBookFromLibrary('${b.id}', event)" title="Remover">🗑</button>
+          </div>
         </div>`;
     }).join('');
   } catch (e) {
@@ -1000,6 +1014,25 @@ async function deleteCurrentBook() {
     document.getElementById("text-input").value = "";
     await loadBookLibrary();
     setStatus("Livro removido.");
+  } catch (e) {
+    setStatus("Erro ao remover: " + e.message, true);
+  }
+}
+
+async function deleteBookFromLibrary(bookId, event) {
+  event.stopPropagation();
+  if (!confirm("Remover este livro da biblioteca?")) return;
+  try {
+    await fetch(`/api/books/${bookId}`, { method: "DELETE" });
+    if (bookId === currentBookId) {
+      currentBookId = null;
+      pdfPages = [];
+      currentPdfPage = -1;
+      document.getElementById("pdf-nav-bar").style.display = "none";
+      document.getElementById("btn-del-book").style.display = "none";
+      document.getElementById("text-input").value = "";
+    }
+    await loadBookLibrary();
   } catch (e) {
     setStatus("Erro ao remover: " + e.message, true);
   }
