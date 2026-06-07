@@ -306,6 +306,97 @@
       font-size: 12px; color: var(--muted); cursor: pointer; white-space: nowrap;
     }
     .auto-label input[type=checkbox] { accent-color: var(--accent); cursor: pointer; }
+
+    /* ── Retry button ── */
+    .btn-retry {
+      display: none; margin: 10px auto 0; padding: 9px 22px;
+      background: transparent; border: 1.5px solid var(--accent);
+      border-radius: 24px; color: var(--accent);
+      cursor: pointer; font-size: 13px; font-weight: 600;
+      transition: background .15s, color .15s;
+    }
+    .btn-retry:hover { background: var(--accent); color: #000; }
+
+    /* ── Library modal ── */
+    .lib-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.75); z-index: 200;
+      overflow-y: auto; padding: 24px;
+    }
+    .lib-overlay.open { display: flex; align-items: flex-start; justify-content: center; }
+    .lib-panel {
+      width: 100%; max-width: 760px; background: var(--surface);
+      border-radius: 16px; padding: 28px;
+      box-shadow: 0 24px 64px rgba(0,0,0,.7);
+    }
+    .lib-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 20px;
+    }
+    .lib-header h2 { font-size: 20px; font-weight: 700; }
+    .lib-close {
+      background: transparent; border: none; color: var(--muted);
+      cursor: pointer; font-size: 22px; line-height: 1;
+      transition: color .15s;
+    }
+    .lib-close:hover { color: var(--text); }
+    .lib-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 14px;
+    }
+    .book-card {
+      background: var(--surface2); border: 1.5px solid var(--surface3);
+      border-radius: 12px; padding: 16px; cursor: pointer;
+      transition: border-color .2s, background .2s;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .book-card:hover { border-color: var(--accent); background: var(--surface3); }
+    .book-card-title {
+      font-size: 14px; font-weight: 700; color: var(--text);
+      overflow: hidden; text-overflow: ellipsis;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    }
+    .book-card-meta { font-size: 12px; color: var(--muted); }
+    .book-card-progress {
+      font-size: 12px; color: var(--accent); font-weight: 600;
+    }
+    .book-card-continue {
+      margin-top: auto; padding: 7px 0; border: none; border-radius: 20px;
+      background: var(--accent); color: #000;
+      cursor: pointer; font-size: 12px; font-weight: 700;
+      transition: background .15s;
+    }
+    .book-card-continue:hover { background: var(--accent-h); }
+    .lib-empty { color: var(--muted); font-size: 14px; text-align: center; padding: 24px 0; }
+    .btn-library {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--surface2); border: 1.5px solid var(--surface3);
+      border-radius: 24px; color: var(--muted);
+      cursor: pointer; font-size: 13px; font-weight: 600;
+      padding: 7px 16px; transition: all .2s; white-space: nowrap;
+    }
+    .btn-library:hover { border-color: var(--muted); color: var(--text); }
+    .btn-library.has-books { border-color: var(--accent); color: var(--accent); }
+
+    /* ── Mobile layout ── */
+    @media (max-width: 600px) {
+      body { padding: 0; align-items: flex-start; }
+      .card { border-radius: 0; padding: 18px 14px; min-height: 100dvh; }
+      .header { margin-bottom: 14px; }
+      .logo h1 { font-size: 18px; }
+      .engine-btn { font-size: 11px; padding: 5px 10px; }
+      #text-input { min-height: 140px; font-size: 15px; line-height: 1.65; }
+      #text-display { font-size: 17px; line-height: 1.75; max-height: 45vh; }
+      .controls { flex-direction: column; align-items: stretch; gap: 14px; }
+      .ctrl-select { max-width: 100%; }
+      #speed-slider { width: 100%; }
+      .bottom-row { gap: 10px; }
+      .btn-play { height: 52px; width: 52px; font-size: 20px; }
+      .lib-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+      .lib-overlay { padding: 0; }
+      .lib-panel { border-radius: 0; min-height: 100dvh; padding: 20px 14px; }
+    }
   </style>
 </head>
 <body>
@@ -333,10 +424,19 @@
   <input type="file" id="pdf-file-input" accept=".pdf,.epub" style="display:none" onchange="onPdfSelected(event)">
   <div class="library-row">
     <button class="btn-pdf" onclick="document.getElementById('pdf-file-input').click()" title="Adicionar livro à biblioteca">📄 Novo Livro</button>
-    <select id="books-select" class="books-select" onchange="onBookSelected(this.value)" style="display:none">
-      <option value="">📚 Escolha um livro...</option>
-    </select>
+    <button class="btn-library" id="btn-library" onclick="openLibrary()">📚 Biblioteca</button>
     <button class="btn-del-book" id="btn-del-book" onclick="deleteCurrentBook()" title="Remover da biblioteca" style="display:none">🗑</button>
+  </div>
+
+  <!-- Library modal -->
+  <div class="lib-overlay" id="lib-overlay" onclick="onOverlayClick(event)">
+    <div class="lib-panel">
+      <div class="lib-header">
+        <h2>📚 Biblioteca</h2>
+        <button class="lib-close" onclick="closeLibrary()">✕</button>
+      </div>
+      <div class="lib-grid" id="lib-grid"></div>
+    </div>
   </div>
 
   <!-- Page navigation (visible when a book is open) -->
@@ -367,13 +467,13 @@
   <div class="controls">
     <div class="control-group">
       <span class="control-label">Voz</span>
-      <select id="voice-select" class="ctrl-select"></select>
+      <select id="voice-select" class="ctrl-select" onchange="saveSettings()"></select>
     </div>
     <div class="control-group">
       <span class="control-label">Velocidade <span id="speed-val">1.0×</span></span>
       <div class="speed-row">
         <input id="speed-slider" type="range" min="0.5" max="2.0" step="0.1" value="1.0"
-               oninput="document.getElementById('speed-val').textContent = parseFloat(this.value).toFixed(1) + '×'" />
+               oninput="document.getElementById('speed-val').textContent = parseFloat(this.value).toFixed(1) + '×'; saveSettings()" />
       </div>
     </div>
   </div>
@@ -396,6 +496,9 @@
   </div>
 
   <div id="status-badge"></div>
+  <div style="text-align:center">
+    <button class="btn-retry" id="btn-retry" onclick="retryPlayback()">↺ Tentar novamente</button>
+  </div>
 </div>
 
 <script>
@@ -464,6 +567,11 @@ let lastWsPayload       = null;
 let lastDecodedSentIdx  = -1;  // last sentence successfully decoded & scheduled
 let reconnectSentOffset = 0;   // sentence index offset when reconnecting mid-text
 
+// Audio queue (replaces promise chain)
+let audioQueue      = [];
+let audioProcessing = false;
+let firstChunkReceived = false;
+
 // iOS: resume AudioContext when user returns to the tab/app
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && audioCtx && audioCtx.state === "suspended" && isPlaying) {
@@ -488,6 +596,7 @@ function setEngine(eng) {
   document.getElementById("btn-edge").classList.toggle("active", eng === "edge");
   document.getElementById("btn-kokoro").classList.toggle("active", eng === "kokoro");
   populateVoices();
+  saveSettings();
 }
 
 function populateVoices() {
@@ -501,9 +610,37 @@ function onLangChange() {
   if (isPlaying) stopPlayback();
   populateVoices();
   if (narratorMode) applyNarratorVoice();
+  saveSettings();
 }
 
 populateVoices();
+
+// ── Settings persistence ──────────────────────────────────────────────────────
+function saveSettings() {
+  try {
+    localStorage.setItem('tts_settings', JSON.stringify({
+      voice:    document.getElementById('voice-select').value,
+      speed:    document.getElementById('speed-slider').value,
+      language: document.getElementById('lang-select').value,
+      engine:   currentEngine,
+      narrator: narratorMode,
+    }));
+  } catch(_) {}
+}
+
+(function loadSettings() {
+  try {
+    const s = JSON.parse(localStorage.getItem('tts_settings') || '{}');
+    if (s.language) { document.getElementById('lang-select').value = s.language; populateVoices(); }
+    if (s.engine && s.engine !== currentEngine) setEngine(s.engine);
+    if (s.voice) document.getElementById('voice-select').value = s.voice;
+    if (s.speed) {
+      document.getElementById('speed-slider').value = s.speed;
+      document.getElementById('speed-val').textContent = parseFloat(s.speed).toFixed(1) + '×';
+    }
+    if (s.narrator) toggleNarrator();
+  } catch(_) {}
+})();
 
 // ── Narrator ──────────────────────────────────────────────────────────────────
 function toggleNarrator() {
@@ -519,6 +656,7 @@ function toggleNarrator() {
     narratorPitch = "+0Hz";
     hint.textContent = "";
   }
+  saveSettings();
 }
 
 function applyNarratorVoice() {
@@ -643,6 +781,30 @@ function hlLoop() {
   requestAnimationFrame(hlLoop);
 }
 
+// ── Audio queue (replaces unbounded promise chain) ───────────────────────────
+async function processAudioQueue() {
+  if (audioProcessing) return;
+  audioProcessing = true;
+  while (audioQueue.length > 0 && isPlaying) {
+    const item = audioQueue.shift();
+    if (item.type === "sentinel") { item.resolve(); continue; }
+    await scheduleAudioChunk(item.arrayBuffer, item.sentIdx);
+  }
+  audioProcessing = false;
+}
+
+function enqueueAudio(arrayBuffer, sentIdx) {
+  audioQueue.push({ arrayBuffer: arrayBuffer.slice(0), sentIdx });
+  if (!audioProcessing) processAudioQueue();
+}
+
+function enqueueSentinel() {
+  return new Promise(resolve => {
+    audioQueue.push({ type: "sentinel", resolve });
+    if (!audioProcessing) processAudioQueue();
+  });
+}
+
 // ── Audio scheduling ──────────────────────────────────────────────────────────
 async function scheduleAudioChunk(arrayBuffer, sentIdx) {
   if (!audioCtx || audioCtx.state === "closed") return;
@@ -692,24 +854,53 @@ let pdfPages       = [];
 let currentPdfPage = -1;
 let currentBookId  = null;
 
+function openLibrary() {
+  document.getElementById("lib-overlay").classList.add("open");
+  loadBookLibrary();
+}
+
+function closeLibrary() {
+  document.getElementById("lib-overlay").classList.remove("open");
+}
+
+function onOverlayClick(e) {
+  if (e.target === document.getElementById("lib-overlay")) closeLibrary();
+}
+
 async function loadBookLibrary() {
+  const grid = document.getElementById("lib-grid");
+  grid.innerHTML = '<p class="lib-empty">Carregando…</p>';
   try {
     const books = await fetch("/api/books").then(r => r.json());
-    const sel = document.getElementById("books-select");
-    sel.innerHTML = `<option value="">📚 Escolha um livro...</option>` +
-      books.map(b => {
-        const progress = b.last_page > 0
-          ? ` · pág. ${b.last_page + 1}/${b.total}`
-          : ` (${b.total} pág.)`;
-        return `<option value="${b.id}">${b.filename}${progress}</option>`;
-      }).join("");
-    sel.style.display = books.length ? "block" : "none";
+    const btn = document.getElementById("btn-library");
+    btn.textContent = books.length ? `📚 Biblioteca (${books.length})` : "📚 Biblioteca";
+    btn.classList.toggle("has-books", books.length > 0);
+
+    if (!books.length) {
+      grid.innerHTML = '<p class="lib-empty">Nenhum livro na biblioteca.<br>Clique em "Novo Livro" para adicionar.</p>';
+      return;
+    }
+
+    grid.innerHTML = books.map(b => {
+      const pct   = b.total > 0 ? Math.round((b.last_page / b.total) * 100) : 0;
+      const label = b.last_page > 0 ? `Pág. ${b.last_page + 1} de ${b.total} · ${pct}%` : `${b.total} páginas`;
+      const cont  = b.last_page > 0 ? "Continuar →" : "Ler →";
+      return `
+        <div class="book-card" onclick="selectBook('${b.id}')">
+          <div class="book-card-title">${b.filename.replace(/\.(pdf|epub)$/i,'')}</div>
+          <div class="book-card-meta">${b.total} páginas</div>
+          ${b.last_page > 0 ? `<div class="book-card-progress">● ${label}</div>` : `<div class="book-card-meta">${label}</div>`}
+          <button class="book-card-continue" onclick="selectBook('${b.id}'); event.stopPropagation()">${cont}</button>
+        </div>`;
+    }).join('');
   } catch (e) {
-    console.warn("Biblioteca indisponível:", e);
+    grid.innerHTML = '<p class="lib-empty">Biblioteca indisponível.</p>';
+    console.warn("Biblioteca:", e);
   }
 }
 
-async function onBookSelected(bookId) {
+async function selectBook(bookId) {
+  closeLibrary();
   if (!bookId) {
     document.getElementById("pdf-nav-bar").style.display = "none";
     document.getElementById("btn-del-book").style.display = "none";
@@ -736,6 +927,8 @@ async function onBookSelected(bookId) {
     setStatus("Erro ao carregar livro: " + e.message, true);
   }
 }
+
+async function onBookSelected(bookId) { await selectBook(bookId); }
 
 async function onPdfSelected(event) {
   const file = event.target.files[0];
@@ -846,6 +1039,7 @@ function startPlayback() {
   audioCtx   = new AC();
   nextTime   = audioCtx.currentTime + 0.1;
   audioChain = Promise.resolve();
+  audioQueue = []; audioProcessing = false; firstChunkReceived = false;
   pendingSentIdx    = -1;
   lastHighlightSent = -1;
   currentWordEl     = null;
@@ -855,6 +1049,7 @@ function startPlayback() {
   decodeErrorCount    = 0;
   lastDecodedSentIdx  = -1;
   reconnectSentOffset = 0;
+  document.getElementById('btn-retry').style.display = 'none';
 
   // iOS: sync play button with AudioContext interruptions (phone call, etc.)
   audioCtx.onstatechange = () => {
@@ -897,17 +1092,19 @@ function openWebSocket(payload) {
   ws.onmessage = (event) => {
     resetStallTimer();
     if (event.data instanceof ArrayBuffer) {
-      const idx = pendingSentIdx;
-      audioChain = audioChain.then(() => scheduleAudioChunk(event.data, idx));
+      if (!firstChunkReceived) { firstChunkReceived = true; setStatus("Reproduzindo…"); }
+      enqueueAudio(event.data, pendingSentIdx);
     } else {
       const msg = JSON.parse(event.data);
       if (msg.type === "sentence_start") {
         pendingSentIdx = msg.index + reconnectSentOffset;
         if (msg.words) sentenceWords[pendingSentIdx] = msg.words;
+        const total = sentences.length;
+        setStatus(`Gerando frase ${pendingSentIdx + 1} de ${total}…`);
       } else if (msg.type === "done") {
         clearTimeout(stallTimer);
         reconnectAttempts = 0;
-        audioChain = audioChain.then(() => {
+        enqueueSentinel().then(() => {
           const remaining = Math.max(0, nextTime - audioCtx.currentTime);
           setTimeout(() => {
             if (!isPlaying) return;
@@ -926,6 +1123,7 @@ function openWebSocket(payload) {
         });
       } else if (msg.type === "error") {
         setStatus("Erro: " + msg.message, true);
+        document.getElementById('btn-retry').style.display = 'inline-block';
         stopPlayback();
       }
     }
@@ -955,13 +1153,13 @@ function attemptReconnect() {
   if (!isPlaying || !lastWsPayload || reconnectAttempts >= MAX_RECONNECT) {
     setStatus("Erro de conexão com o servidor.", true);
     setPlayingState(false);
+    if (lastWsPayload) document.getElementById('btn-retry').style.display = 'inline-block';
     return;
   }
   reconnectAttempts++;
   const delay = 1000 * reconnectAttempts;
   setStatus(`Reconectando (${reconnectAttempts}/${MAX_RECONNECT})…`);
 
-  // Build payload with only the remaining sentences (skip already-decoded ones)
   const sentOffset = lastDecodedSentIdx + 1;
   const hasRemaining = sentOffset > 0 && sentOffset < sentences.length;
   reconnectSentOffset = hasRemaining ? sentOffset : 0;
@@ -969,17 +1167,25 @@ function attemptReconnect() {
     ? { ...lastWsPayload, text: sentences.slice(sentOffset).join(" ") }
     : lastWsPayload;
 
-  // Reset audio state for clean restart (but preserve highlight/display state)
   if (audioCtx) { audioCtx.close().catch(() => {}); }
   const AC = window.AudioContext || window.webkitAudioContext;
   audioCtx = new AC();
   nextTime = audioCtx.currentTime + 0.1;
   audioChain = Promise.resolve();
+  audioQueue = []; audioProcessing = false; firstChunkReceived = false;
   pendingSentIdx = reconnectSentOffset - 1;
   decodeErrorCount = 0;
-  // Do NOT reset lastHighlightSent/pendingHighlights — preserve already-done word highlights
 
   setTimeout(() => openWebSocket(reconnectPayload), delay);
+}
+
+function retryPlayback() {
+  document.getElementById('btn-retry').style.display = 'none';
+  reconnectAttempts = 0;
+  isPlaying = true;
+  document.getElementById('btn-play').textContent = '⏸';
+  document.getElementById('waveform').classList.add('playing');
+  attemptReconnect();
 }
 
 function stopPlayback() {
@@ -989,10 +1195,12 @@ function stopPlayback() {
   if (audioCtx) { audioCtx.close().catch(() => {}); audioCtx = null; }
   nextTime          = 0;
   audioChain        = Promise.resolve();
+  audioQueue        = []; audioProcessing = false;
   pendingHighlights = [];
   hlLoopActive      = false;
   reconnectAttempts = 0;
   decodeErrorCount  = 0;
+  document.getElementById('btn-retry').style.display = 'none';
   setPlayingState(false);
 }
 </script>
